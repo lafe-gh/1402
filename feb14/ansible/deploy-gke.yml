@@ -1,4 +1,4 @@
----
+--
 - name: Deploy Crypto Chatbot to GKE
   hosts: localhost
   connection: local
