@@ -1,11 +1,12 @@
 ---
-- name: Deploy Crypto Chatbot to GKE
+- name: Deploy Crypto Chatbot to GKE (Secured)
   hosts: localhost
   connection: local
   gather_facts: false
 
   vars:
     project_id: "{{ lookup('env', 'PROJECT_ID') }}"
+    google_api_key: "{{ lookup('env', 'GOOGLE_API_KEY') }}"
     region: "us-central1"
     cluster_name: "test-cluster-a"
     registry_base: "us-central1-docker.pkg.dev/{{ project_id }}/agent-repo"
@@ -30,6 +31,17 @@
     # ─────────────────────────────────────
     - name: Aplicar namespace
       command: kubectl apply -f {{ k8s_dir }}/namespace.yaml
+      changed_when: false
+
+    # ─────────────────────────────────────
+    # Crear/Actualizar Kubernetes Secret
+    # ─────────────────────────────────────
+    - name: Crear Secret con GOOGLE_API_KEY
+      shell: |
+        kubectl create secret generic backend-secrets \
+          --namespace={{ namespace }} \
+          --from-literal=GOOGLE_API_KEY={{ google_api_key }} \
+          --dry-run=client -o yaml | kubectl apply -f -
       changed_when: false
 
     # ─────────────────────────────────────
