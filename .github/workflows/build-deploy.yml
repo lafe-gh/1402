@@ -46,7 +46,7 @@ jobs:
           gcloud auth configure-docker ${{ env.REGISTRY }}
 
       # ─────────────────────────────────────
-      # Build y Push — Backend (Python)
+      # Build — Backend (Python)
       # ─────────────────────────────────────
       - name: Build backend image
         run: |
@@ -55,13 +55,8 @@ jobs:
             -t ${{ env.REGISTRY }}/${{ secrets.PROJECT_ID }}/${{ env.REPO }}/agent-backend:latest \
             backend/
 
-      - name: Push backend image
-        run: |
-          docker push ${{ env.REGISTRY }}/${{ secrets.PROJECT_ID }}/${{ env.REPO }}/agent-backend:${{ github.sha }}
-          docker push ${{ env.REGISTRY }}/${{ secrets.PROJECT_ID }}/${{ env.REPO }}/agent-backend:latest
-
       # ─────────────────────────────────────
-      # Build y Push — Frontend (Nginx)
+      # Build — Frontend (Nginx)
       # ─────────────────────────────────────
       - name: Build frontend image
         run: |
@@ -70,6 +65,38 @@ jobs:
             -t ${{ env.REGISTRY }}/${{ secrets.PROJECT_ID }}/${{ env.REPO }}/agent-frontend:latest \
             frontend/
 
+      # ─────────────────────────────────────
+      #  Escaneo de seguridad — Backend
+      # ─────────────────────────────────────
+      - name: Trivy scan backend image
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: '${{ env.REGISTRY }}/${{ secrets.PROJECT_ID }}/${{ env.REPO }}/agent-backend:${{ github.sha }}'
+          format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+
+      # ─────────────────────────────────────
+      #  Escaneo de seguridad — Frontend
+      # ─────────────────────────────────────
+      - name: Trivy scan frontend image
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: '${{ env.REGISTRY }}/${{ secrets.PROJECT_ID }}/${{ env.REPO }}/agent-frontend:${{ github.sha }}'
+          format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+
+      # ─────────────────────────────────────
+      # Push imágenes Backend y Frontend (solo si Trivy pasa)
+      # ─────────────────────────────────────
+      - name: Push backend image
+        run: |
+          docker push ${{ env.REGISTRY }}/${{ secrets.PROJECT_ID }}/${{ env.REPO }}/agent-backend:${{ github.sha }}
+          docker push ${{ env.REGISTRY }}/${{ secrets.PROJECT_ID }}/${{ env.REPO }}/agent-backend:latest
+          
       - name: Push frontend image
         run: |
           docker push ${{ env.REGISTRY }}/${{ secrets.PROJECT_ID }}/${{ env.REPO }}/agent-frontend:${{ github.sha }}
