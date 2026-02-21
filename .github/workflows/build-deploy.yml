@@ -1,0 +1,94 @@
+name: Build and Deploy Crypto Chatbot to GKE
+
+on:
+  push:
+    branches: [main]
+
+env:
+  REGION: us-central1
+  REGISTRY: us-central1-docker.pkg.dev
+  REPO: agent-repo
+  CLUSTER_NAME: test-cluster-a
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ─────────────────────────────────────
+      # Checkout del código
+      # ─────────────────────────────────────
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # ─────────────────────────────────────
+      # Crear .env del backend dinámicamente
+      # ─────────────────────────────────────
+      - name: Create backend .env
+        run: |
+          echo "GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}" > backend/.env
+
+      # ─────────────────────────────────────
+      # Autenticación en GCP
+      # ─────────────────────────────────────
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: '${{ secrets.GCP_SA_KEY }}'
+
+      - name: Set up Cloud SDK with kubectl
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: 'kubectl,gke-gcloud-auth-plugin'
+
+      - name: Configure Docker for Artifact Registry
+        run: |
+          gcloud auth configure-docker ${{ env.REGISTRY }}
+
+      # ─────────────────────────────────────
+      # Build y Push — Backend (Python)
+      # ─────────────────────────────────────
+      - name: Build backend image
+        run: |
+          docker build \
+            -t ${{ env.REGISTRY }}/${{ secrets.PROJECT_ID }}/${{ env.REPO }}/agent-backend:${{ github.sha }} \
+            -t ${{ env.REGISTRY }}/${{ secrets.PROJECT_ID }}/${{ env.REPO }}/agent-backend:latest \
+            backend/
+
+      - name: Push backend image
+        run: |
+          docker push ${{ env.REGISTRY }}/${{ secrets.PROJECT_ID }}/${{ env.REPO }}/agent-backend:${{ github.sha }}
+          docker push ${{ env.REGISTRY }}/${{ secrets.PROJECT_ID }}/${{ env.REPO }}/agent-backend:latest
+
+      # ─────────────────────────────────────
+      # Build y Push — Frontend (Nginx)
+      # ─────────────────────────────────────
+      - name: Build frontend image
+        run: |
+          docker build \
+            -t ${{ env.REGISTRY }}/${{ secrets.PROJECT_ID }}/${{ env.REPO }}/agent-frontend:${{ github.sha }} \
+            -t ${{ env.REGISTRY }}/${{ secrets.PROJECT_ID }}/${{ env.REPO }}/agent-frontend:latest \
+            frontend/
+
+      - name: Push frontend image
+        run: |
+          docker push ${{ env.REGISTRY }}/${{ secrets.PROJECT_ID }}/${{ env.REPO }}/agent-frontend:${{ github.sha }}
+          docker push ${{ env.REGISTRY }}/${{ secrets.PROJECT_ID }}/${{ env.REPO }}/agent-frontend:latest
+
+      # ─────────────────────────────────────
+      # Instalar Ansible y plugin de GKE
+      # ─────────────────────────────────────
+      - name: Install Ansible
+        run: |
+          pip install ansible
+
+      # ─────────────────────────────────────
+      # Deploy via Ansible → GKE
+      # ─────────────────────────────────────
+      - name: Deploy to GKE via Ansible
+        env:
+          PROJECT_ID: ${{ secrets.PROJECT_ID }}
+          USE_GKE_GCLOUD_AUTH_PLUGIN: "True"
+        run: |
+          ansible-playbook ansible/deploy-gke.yml \
+            --extra-vars "image_tag=${{ github.sha }}"
