@@ -1,0 +1,126 @@
+---
+- name: Deploy Crypto Chatbot to GKE
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    project_id: "{{ lookup('env', 'PROJECT_ID') }}"
+    region: "us-central1"
+    cluster_name: "test-cluster-a"
+    registry_base: "us-central1-docker.pkg.dev/{{ project_id }}/agent-repo"
+    namespace: "ucm-master"
+    k8s_dir: "{{ playbook_dir }}/../k8s"
+    # image_tag se pasa como --extra-vars
+
+  tasks:
+
+    # ─────────────────────────────────────
+    # Obtener credenciales del clúster GKE
+    # ─────────────────────────────────────
+    - name: Obtener credenciales de GKE
+      command: >
+        gcloud container clusters get-credentials {{ cluster_name }}
+          --region {{ region }}
+          --project {{ project_id }}
+      changed_when: false
+
+    # ─────────────────────────────────────
+    # Crear namespace (idempotente)
+    # ─────────────────────────────────────
+    - name: Aplicar namespace
+      command: kubectl apply -f {{ k8s_dir }}/namespace.yaml
+      changed_when: false
+
+    # ─────────────────────────────────────
+    # Preparar manifiestos con imagen real
+    # ─────────────────────────────────────
+    - name: Crear directorio temporal para manifiestos
+      tempfile:
+        state: directory
+        suffix: k8s-deploy
+      register: tmp_dir
+
+    - name: Procesar backend.yaml con imagen correcta
+      shell: |
+        sed -e 's|PROJECT_ID|{{ project_id }}|g' \
+            -e 's|IMAGE_TAG|{{ image_tag }}|g' \
+            {{ k8s_dir }}/backend.yaml > {{ tmp_dir.path }}/backend.yaml
+
+    - name: Procesar frontend.yaml con imagen correcta
+      shell: |
+        sed -e 's|PROJECT_ID|{{ project_id }}|g' \
+            -e 's|IMAGE_TAG|{{ image_tag }}|g' \
+            {{ k8s_dir }}/frontend.yaml > {{ tmp_dir.path }}/frontend.yaml
+
+    # ─────────────────────────────────────
+    # Desplegar en GKE
+    # ─────────────────────────────────────
+    - name: Desplegar backend
+      command: kubectl apply -f {{ tmp_dir.path }}/backend.yaml
+      register: backend_deploy
+
+    - name: Desplegar frontend
+      command: kubectl apply -f {{ tmp_dir.path }}/frontend.yaml
+      register: frontend_deploy
+
+    - name: Mostrar resultado del despliegue
+      debug:
+        msg:
+          - "Backend: {{ backend_deploy.stdout }}"
+          - "Frontend: {{ frontend_deploy.stdout }}"
+
+    # ─────────────────────────────────────
+    # Verificar estado del despliegue
+    # (Autopilot puede tardar varios minutos
+    #  en aprovisionar nodos la primera vez)
+    # ─────────────────────────────────────
+    - name: Esperar a que el backend esté disponible
+      command: >
+        kubectl get deployment agent-backend -n {{ namespace }}
+          -o jsonpath='{.status.availableReplicas}'
+      register: backend_status
+      retries: 20
+      delay: 30
+      until: backend_status.stdout | default('0') | int >= 1
+      changed_when: false
+
+    - name: Esperar a que el frontend esté disponible
+      command: >
+        kubectl get deployment agent-frontend -n {{ namespace }}
+          -o jsonpath='{.status.availableReplicas}'
+      register: frontend_status
+      retries: 20
+      delay: 30
+      until: frontend_status.stdout | default('0') | int >= 1
+      changed_when: false
+
+    - name: Obtener pods en ejecución
+      command: kubectl get pods -n {{ namespace }} -o wide
+      register: pod_status
+
+    - name: Mostrar estado de pods
+      debug:
+        msg: "{{ pod_status.stdout_lines }}"
+
+    # ─────────────────────────────────────
+    # Obtener IP externa del frontend
+    # ─────────────────────────────────────
+    - name: Obtener servicio frontend
+      command: kubectl get svc agent-frontend -n {{ namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+      register: frontend_ip
+      retries: 10
+      delay: 15
+      until: frontend_ip.stdout | length > 0
+
+    - name: Mostrar URL de acceso
+      debug:
+        msg: "🚀 Chatbot disponible en: http://{{ frontend_ip.stdout }}"
+
+    # ─────────────────────────────────────
+    # Limpieza
+    # ─────────────────────────────────────
+    - name: Eliminar directorio temporal
+      file:
+        path: "{{ tmp_dir.path }}"
+        state: absent
