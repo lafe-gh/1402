@@ -20,6 +20,12 @@ spec:
           image: us-central1-docker.pkg.dev/PROJECT_ID/agent-repo/agent-backend:IMAGE_TAG
           ports:
             - containerPort: 80
+          env:
+            - name: GOOGLE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: GOOGLE_API_KEY
           resources:
             requests:
               cpu: 250m
