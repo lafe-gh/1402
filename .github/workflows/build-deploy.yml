@@ -1,4 +1,4 @@
-name: Build and Deploy Crypto Chatbot to GKE
+name: Build and Deploy Crypto Chatbot to GKE (Secured)
 
 on:
   push:
@@ -70,7 +70,8 @@ jobs:
             frontend/
 
       # ─────────────────────────────────────
-      #  Escaneo de seguridad — Backend
+      # 🔍 Escaneo de seguridad con Trivy
+      # (Bloquea el pipeline si hay CRITICAL/HIGH)
       # ─────────────────────────────────────
       - name: Trivy scan backend image
         uses: aquasecurity/trivy-action@0.33.1
@@ -81,9 +82,6 @@ jobs:
           severity: 'CRITICAL,HIGH'
           ignore-unfixed: true
 
-      # ─────────────────────────────────────
-      #  Escaneo de seguridad — Frontend
-      # ─────────────────────────────────────
       - name: Trivy scan frontend image
         uses: aquasecurity/trivy-action@0.33.1
         with:
@@ -94,20 +92,20 @@ jobs:
           ignore-unfixed: true
 
       # ─────────────────────────────────────
-      # Push imágenes Backend y Frontend (solo si Trivy pasa)
+      # Push imágenes (solo si Trivy pasa)
       # ─────────────────────────────────────
       - name: Push backend image
         run: |
           docker push ${{ env.REGISTRY }}/${{ secrets.PROJECT_ID }}/${{ env.REPO }}/agent-backend:${{ github.sha }}
           docker push ${{ env.REGISTRY }}/${{ secrets.PROJECT_ID }}/${{ env.REPO }}/agent-backend:latest
-          
+
       - name: Push frontend image
         run: |
           docker push ${{ env.REGISTRY }}/${{ secrets.PROJECT_ID }}/${{ env.REPO }}/agent-frontend:${{ github.sha }}
           docker push ${{ env.REGISTRY }}/${{ secrets.PROJECT_ID }}/${{ env.REPO }}/agent-frontend:latest
 
       # ─────────────────────────────────────
-      # Instalar Ansible y plugin de GKE
+      # Instalar Ansible
       # ─────────────────────────────────────
       - name: Install Ansible
         run: |
@@ -119,6 +117,7 @@ jobs:
       - name: Deploy to GKE via Ansible
         env:
           PROJECT_ID: ${{ secrets.PROJECT_ID }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           USE_GKE_GCLOUD_AUTH_PLUGIN: "True"
         run: |
           ansible-playbook ansible/deploy-gke.yml \
